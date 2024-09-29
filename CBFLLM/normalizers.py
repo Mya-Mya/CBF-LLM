@@ -9,18 +9,14 @@ float32 = torch.float32
 
 class Normalizer(ABC):
     """
-    正規化器R：フィルタFからの出力を加工し要素の和を1にして，確率分布の値にする
+    The Normalizer R
     """
     @abstractmethod
     def __call__(self, P: Tensor, allowed_tokens: List[int]) -> Tensor:
         pass
 
 
-class MinJSDNormalizer(Normalizer):
-    """
-    加工前と後とでJensen-Shanon Divergenceが最小となるような正規化器
-    """
-
+class ElementwiseMultiplyNormalizer(Normalizer):
     def __call__(self, P: Tensor, allowed_tokens: List[int]) -> Tensor:
         Q = zeros_like(P, device=P.device, dtype=float32)
         Q[allowed_tokens] = P[allowed_tokens]
@@ -29,11 +25,7 @@ class MinJSDNormalizer(Normalizer):
         return Q
 
 
-class Min2NormNormalizer(Normalizer):
-    """
-    加工前と後とで2乗誤差が最小となるような正規化器
-    """
-
+class ElementwiseAddNormalizer(Normalizer):
     def __call__(self, P: Tensor, allowed_tokens: List[int]) -> Tensor:
         Q = zeros_like(P, device=P.device, dtype=float32)
         r = (1.0 - P[allowed_tokens].sum()) / len(allowed_tokens)

@@ -5,7 +5,7 @@ from torch import no_grad
 
 class LanguageCF:
     """
-    制約言語関数(Language-Constraint Function, L-CF) h
+    Represents the Language-Constraint Function, L-CF, "h(x)".
     """
 
     def __init__(
@@ -19,13 +19,13 @@ class LanguageCF:
         Parameters
         ----------
         model: PreTrainedModel
-            制約言語関数に使うモデル
+            The model used in the L-CF.
         tokenizer: PreTrainedTokenizerBase
-            制約言語関数に使うモデルのトークナイザ
-        mapper: Callable[[SequenceClassifierOutput], List[float]],
-            モデルの出力から制約言語関数の値に変換する関数
+            The tokenizer associated with the model used in the L-CF.
+        mapper: Callable[[SequenceClassifierOutput], List[float]]
+            A function that maps the model's output to the values of the L-CF.
         name: Optional[str] = None
-            この制約言語関数の名前
+            The name of this L-CF.
         """
         self.model = model
         self.tokenizer = tokenizer
@@ -41,7 +41,7 @@ class LanguageCF:
         return self.get_for_texts([xstr])[0]
 
     def get_for_texts(self, xstr_list: List[str]) -> List[float]:
-        # キャッシュに無いものを探す
+        # Collect texts that are not in the cache.
         has_any_nc = False
         nc_xstr_list = []
         for xstr in xstr_list:
@@ -49,11 +49,10 @@ class LanguageCF:
                 has_any_nc = True
                 nc_xstr_list.append(xstr)
 
-        # キャッシュに無いものがある
         if has_any_nc:
             self.prepare_cache(nc_xstr_list)
 
-        # 全てのxstrに対してキャッシュがあるはず
+        # The cache should have all texts.
         return [self.cache[xstr] for xstr in xstr_list]
 
     @no_grad
@@ -64,7 +63,7 @@ class LanguageCF:
                                 return_tensors="pt").to(self.model.device)
         output = self.model(**inputs)
         res = self.mapper(output)
-        # キャッシュに登録する
+        # Register to the cache.
         for xstr, h in zip(xstr_list, res):
             self.cache[xstr] = h
         self.cache_keys |= set(xstr_list)

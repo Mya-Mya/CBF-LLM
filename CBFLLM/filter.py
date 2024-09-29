@@ -1,5 +1,5 @@
 # CBF-LLM Modules
-from language_constraint_functions import LanguageCF
+from .language_constraint_functions import LanguageCF
 # Other Modules
 from typing import List, Dict, Union
 from abc import ABC, abstractmethod
@@ -18,35 +18,35 @@ kron = torch.kron
 class FilterResult:
     allowed: List[int] = field(default_factory=list)
     disallowed: List[int] = field(default_factory=list)
-    clf_mapping: Dict[int, float] = field(default_factory=dict)
+    lcf_mapping: Dict[int, float] = field(default_factory=dict)
 
 
 class Filter(ABC):
     """
-    制約条件に従ってトークンを許可/禁止する
+    Allows/disallows tokens based on specified constraints.
     """
     @abstractmethod
     def scan(self, x: Tensor, P: Tensor) -> FilterResult:
         pass
 
 
-def get_next_CLF_list(
+def get_next_lcf_list(
     current_x: Tensor,
     next_token_list: Union[Tensor, List[int]],
     tokenizer: PreTrainedTokenizerBase,
-    clf: LanguageCF
+    lcf: LanguageCF
 ) -> List[float]:
     """
     Parameters
     ----------
     current_x: Tensor
-        現在のテキスト
+        Current text input
     next_token_list: List[int]
-        次に続くトークン一覧
+        List of next possible tokens
     tokenizer: PreTrainedTokenizerBase
-        生成言語モデルのトークナイザ
-    clf: LanguageCF
-        使用している制約言語関数
+        Tokenizer of the language generation model
+    lcf: LanguageCF
+        The language-constraint function object
     """
     device = current_x.device
     dtype = current_x.dtype
@@ -61,5 +61,5 @@ def get_next_CLF_list(
     next_token_list = next_token_list.reshape(-1, 1)
     next_x_list = hstack((kron(I, current_x), next_token_list))
     next_xstr_list = tokenizer.batch_decode(next_x_list)
-    next_CLF_list = clf.get_for_texts(next_xstr_list)
-    return next_CLF_list
+    next_lcf_list = lcf.get_for_texts(next_xstr_list)
+    return next_lcf_list

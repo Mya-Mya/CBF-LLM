@@ -1,7 +1,7 @@
 # CBF-LLM Modules
-from torch_utils import *
-from filter import Filter, FilterResult, get_next_CLF_list
-from language_constraint_functions import LanguageCF
+from .torch_utils import *
+from .filter import Filter, FilterResult, get_next_lcf_list
+from .language_constraint_functions import LanguageCF
 # Other Modules
 from typing import Any
 from transformers import PreTrainedTokenizerBase
@@ -12,40 +12,33 @@ zeros = torch.zeros
 float32 = torch.float32
 
 
-class CBFFilter(Filter):
+class BlacklistFilter(Filter):
     def __init__(
         self,
         top_k: int,
-        alpha: float,
         tokenizer: PreTrainedTokenizerBase,
-        lcf: LanguageCF,
+        clf: LanguageCF,
         chunk_size: int = 32
     ) -> None:
         """
         Parameters
         ----------
         top_k: int
-            生成パラメータトップk
-        alpha: float
-            CBFパラメータα
+            Generation parameter top-k
         tokenizer: PreTrainedTokenizerBase
-            生成言語モデルのトークナイザ
-        clf: LanguageCF
-            制約言語関数
-        chunk_size: int=32
-            制約言語関数へ問い合わせる際のチャンクサイズ
-        """
+            Tokenizer of the generative language model
+        lcf: LanguageCF
+            The language-constraint function object
+        chunk_size: int, optional (default = 32)
+            Chunk size for querying the constraint language function
+          """
         self.top_k = top_k
-        if alpha == 1.0:
-            print("alpha=1は`BlacklistFilter`と等価であり，そちらを使う方がパフォーマンスが高いです．")
-        self.alpha = alpha
         self.tokenizer = tokenizer
-        self.lcf = lcf
+        self.clf = clf
         self.chunk_size = chunk_size
 
         self.vocab_size = len(tokenizer.get_vocab())
         self.all_disallowed_Q = zeros((self.vocab_size,), dtype=float32)
-        self.one_minus_alpha = 1. - alpha
 
         self.chunk_size = chunk_size
 
@@ -53,10 +46,6 @@ class CBFFilter(Filter):
         assert (P.sum() - 1.0).abs() < 1e-5, f"Sum of input distribution P = {
             tofloat(P.sum())}, expected around 1."
         R = FilterResult()
-
-        xstr = self.tokenizer.decode(x)
-        hx = self.lcf.get_for_text(xstr)
-        A = self.one_minus_alpha * hx
 
         sorted_next_tokens = P.argsort(descending=True)
 
@@ -66,12 +55,12 @@ class CBFFilter(Filter):
         while allowed_cnt < self.top_k and searched_cnt < self.vocab_size:
             offset = self.chunk_size * chunk_idx
             chunk_next_token_list = sorted_next_tokens[offset:offset+self.chunk_size]
-            chunk_next_h_list = get_next_CLF_list(
-                x, chunk_next_token_list, self.tokenizer, self.lcf)
+            chunk_next_h_list = get_next_lcf_list(
+                x, chunk_next_token_list, self.tokenizer, self.clf)
 
             for t, h in zip(tolist(chunk_next_token_list), chunk_next_h_list):
-                R.clf_mapping[t] = h
-                if h >= A:
+                R.lcf_mapping[t] = h
+                if h >= 0:
                     R.allowed.append(t)
                     allowed_cnt += 1
                     if allowed_cnt >= self.top_k:
