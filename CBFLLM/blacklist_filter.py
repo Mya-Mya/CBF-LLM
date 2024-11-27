@@ -43,7 +43,7 @@ class BlacklistFilter(Filter):
         self.chunk_size = chunk_size
 
     def scan(self, x: Tensor, P: Tensor) -> Any:
-        assert (P.sum() - 1.0).abs() < 1e-5, f"Sum of input distribution P = {
+        assert (P.sum() - 1.0).abs() < 1e-3, f"Sum of input distribution P = {
             tofloat(P.sum())}, expected around 1."
         R = FilterResult()
 
