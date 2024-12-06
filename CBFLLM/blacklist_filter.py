@@ -1,11 +1,8 @@
-# CBF-LLM Modules
 from .torch_utils import *
 from .filter import Filter, FilterResult, get_next_lcf_list
 from .language_constraint_functions import LanguageCF
-# Other Modules
 from typing import Any
 from transformers import PreTrainedTokenizerBase
-# PyTorch
 import torch
 Tensor = torch.Tensor
 zeros = torch.zeros
