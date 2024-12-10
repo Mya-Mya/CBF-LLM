@@ -10,12 +10,12 @@ PreTrainedTokenizerBase = transformers.PreTrainedTokenizerBase
 
 
 @dataclass
-class SingleAheadFilterSpecMeasureResult:
+class SSAFilterSpecMeasureResult:
     satisfaction_list: List[bool] = field(default_factory=list)
     lcfvalue_list: List[float] = field(default_factory=list)
 
 
-class SingleAheadFilterSpec(ABC):
+class SSAFilterSpec(ABC):
     @abstractmethod
     def measure(
         self,
@@ -23,7 +23,7 @@ class SingleAheadFilterSpec(ABC):
         next_token_list: Tensor,
         xstr: str,
         next_xstr_list: List[str]
-    ) -> SingleAheadFilterSpecMeasureResult:
+    ) -> SSAFilterSpecMeasureResult:
         """
         Note that `xstr` is equivalent to the decoded `x`, 
         and `next_xstr_list[i]` is equivalent to the decoded `hstack((x, next_token_list[i]))`.
@@ -50,16 +50,17 @@ LCFValueMapping = Dict[int, float]
 
 
 @dataclass
-class SingleAheadFilterResult:
+class SSAFilterResult:
     allowed: List[int] = field(default_factory=list)
     disallowed: List[int] = field(default_factory=list)
-    lcfvalue_mappings: Dict[str, LCFValueMapping] = field(default_factory=dict)
+    disallowed_by_spec:Dict[str, List[int]] = field(default_factory=list)
+    lcfvalue_mappings: Dict[str, LCFValueMapping] = field(default_factory=list)
 
 
-class SingleAheadFilterGroup:
+class SSAFilterGroup:
     def __init__(
         self,
-        specs: List[SingleAheadFilterSpec],
+        specs: List[SSAFilterSpec],
         top_k: int,
         baselinellm_tokenizer: PreTrainedTokenizerBase,
         chunk_size: int = 32
@@ -69,29 +70,36 @@ class SingleAheadFilterGroup:
         self.tokenizer = baselinellm_tokenizer
         self.chunk_size = chunk_size
 
-    def filter(self, x: Tensor, P: Tensor) -> SingleAheadFilterResult:
-        filter_result = SingleAheadFilterResult()
-        filter_result.lcfvalue_mappings = {
+    def filter(self, x: Tensor, P: Tensor) -> SSAFilterResult:
+        result = SSAFilterResult()
+        result.lcfvalue_mappings = {
             spec.get_name(): {} for spec in self.specs
+        }
+        result.disallowed_by_spec = {
+            spec.get_name(): [] for spec in self.specs
         }
 
         sorted_next_tokens = P.argsort(descending=True)
 
         xstr = self.tokenizer.decode(x)
 
-        chunker = torch.ones(self.chunk_size, 1, dtype=P.dtype).to(P.device) # (chunk_size, 1)
-        x_chunk = torch.kron(chunker, x) # (chunk_size, len(x))
+        # (chunk_size, 1)
+        chunker = torch.ones(self.chunk_size, 1, dtype=x.dtype).to(P.device)
+        x_chunk = torch.kron(chunker, x)  # (chunk_size, len(x))
 
         vocab_size = len(P)
         chunk_idx = 0
         while \
-                len(filter_result.allowed) < self.top_k and \
+                len(result.allowed) < self.top_k and \
                 chunk_idx * self.chunk_size < vocab_size:
             offset = self.chunk_size * chunk_idx
-            next_tokens_chunk = sorted_next_tokens[offset:offset+self.chunk_size] # (chunk_size, )
-            next_tokens_chunk_T = next_tokens_chunk[None].T # (chunk_size, 1)
-            next_x_chunk = torch.hstack((x_chunk, next_tokens_chunk_T)) # (chunk_size, len(x)+1)
-            next_xstr_chunk = self.tokenizer.batch_decode(next_x_chunk) # (chunk_size,)
+            # (chunk_size, )
+            next_tokens_chunk = sorted_next_tokens[offset:offset+self.chunk_size]
+            next_tokens_chunk_T = next_tokens_chunk[None].T  # (chunk_size, 1)
+            # (chunk_size, len(x)+1)
+            next_x_chunk = torch.hstack((x_chunk, next_tokens_chunk_T))
+            # (chunk_size,)
+            next_xstr_chunk = self.tokenizer.batch_decode(next_x_chunk)
 
             # Measure
             measure_result_list = [
@@ -104,23 +112,27 @@ class SingleAheadFilterGroup:
                 for spec in self.specs
             ]
 
-            # Add each token to either allowed/disallowed
-            for i, token in enumerate(next_tokens_chunk):
-                is_allowed = all([
-                    measure_result.satisfaction_list[i]
-                    for measure_result in measure_result_list
-                ])
+            for i, token_id in enumerate(tolist(next_tokens_chunk)):
+                # Record L-CF values
+                for spec, measure_result in zip(self.specs, measure_result_list):
+                    name = spec.get_name()
+                    result.lcfvalue_mappings[name][token_id] = measure_result.lcfvalue_list[i]
+
+                # Update disallowed-by-spec
+                is_allowed = True
+                for spec, measure_result in zip(self.specs, measure_result_list):
+                    does_spec_allow = measure_result.satisfaction_list[i]
+                    if not does_spec_allow:
+                        result.disallowed_by_spec[spec.get_name()].append(token_id)
+                        is_allowed = False
+                
+                # Add the token to either allowed/disallowed
                 if is_allowed:
-                    filter_result.allowed.append(token)
+                    result.allowed.append(token_id)
+                    if len(result.allowed) == self.top_k:
+                        return result
                 else:
-                    filter_result.disallowed.append(token)
-            
-            # Record L-CF values of each spec
-            next_tokens_chunk_list = tolist(next_tokens_chunk)
-            for spec, measure_result in zip(self.specs, measure_result_list):
-                name = spec.get_name()
-                lcfvalue_list = measure_result.lcfvalue_list
-                filter_result.lcfvalue_mappings[name] = \
-                    dict(zip(next_tokens_chunk_list, lcfvalue_list))
+                    result.disallowed.append(token_id)
 
             chunk_idx += 1
+        return result

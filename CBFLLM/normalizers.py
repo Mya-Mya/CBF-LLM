@@ -18,7 +18,7 @@ class Normalizer(ABC):
 
 class ElementwiseMultiplyNormalizer(Normalizer):
     def __call__(self, P: Tensor, allowed_tokens: List[int]) -> Tensor:
-        Q = zeros_like(P, device=P.device, dtype=float32)
+        Q = zeros_like(P, device=P.device, dtype=P.dtype)
         Q[allowed_tokens] = P[allowed_tokens]
         r = P[allowed_tokens].sum()
         Q /= r
@@ -27,7 +27,7 @@ class ElementwiseMultiplyNormalizer(Normalizer):
 
 class ElementwiseAddNormalizer(Normalizer):
     def __call__(self, P: Tensor, allowed_tokens: List[int]) -> Tensor:
-        Q = zeros_like(P, device=P.device, dtype=float32)
+        Q = zeros_like(P, device=P.device, dtype=P.dtype)
         r = (1.0 - P[allowed_tokens].sum()) / len(allowed_tokens)
         Q[allowed_tokens] = P[allowed_tokens] + r
         return Q
